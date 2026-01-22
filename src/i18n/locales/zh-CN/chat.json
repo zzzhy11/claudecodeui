@@ -12,6 +12,15 @@
     "cursor": "Cursor",
     "codex": "Codex"
   },
+  "modelSelection": {
+    "label": "选择模型",
+    "ready": "已准备好使用 {{provider}}（模型：{{model}}）。请在下方开始输入。",
+    "selectProviderHint": "请先在上方选择一个提供方开始",
+    "codex": {
+      "usingCliDefault": "尚未手动选择模型，已使用 Codex CLI 默认模型：{{model}}",
+      "unsupportedCliModelFallback": "检测到 Codex CLI 默认模型不受当前 UI 支持（{{cliModel}}），已回退到 {{fallbackModel}}。你可以在下拉框中手动切换。"
+    }
+  },
   "tools": {
     "settings": "工具设置",
     "error": "工具错误",

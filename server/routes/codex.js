@@ -5,6 +5,7 @@ import path from 'path';
 import os from 'os';
 import TOML from '@iarna/toml';
 import { getCodexSessions, getCodexSessionMessages, deleteCodexSession } from '../projects.js';
+import { resolveCodexModelPreference } from '../../shared/codexModel.js';
 
 const router = express.Router();
 
@@ -25,20 +26,32 @@ router.get('/config', async (req, res) => {
     const content = await fs.readFile(configPath, 'utf8');
     const config = TOML.parse(content);
 
+    const cliModel = config.model || null;
+    const resolved = resolveCodexModelPreference({ storedModel: null, cliModel });
+
+    if (cliModel && !resolved.modelSupported) {
+      console.warn('[codex][config] Unsupported CLI default model:', cliModel, '→ fallback:', resolved.model);
+    }
+
     res.json({
       success: true,
       config: {
-        model: config.model || null,
+        model: cliModel,
+        modelSupported: cliModel ? resolved.modelSupported : null,
+        effectiveModel: resolved.model,
         mcpServers: config.mcp_servers || {},
         approvalMode: config.approval_mode || 'suggest'
       }
     });
   } catch (error) {
     if (error.code === 'ENOENT') {
+      const resolved = resolveCodexModelPreference({ storedModel: null, cliModel: null });
       res.json({
         success: true,
         config: {
           model: null,
+          modelSupported: null,
+          effectiveModel: resolved.model,
           mcpServers: {},
           approvalMode: 'suggest'
         }

@@ -40,6 +40,7 @@ import ThinkingModeSelector, { thinkingModes } from './ThinkingModeSelector.jsx'
 import Fuse from 'fuse.js';
 import CommandMenu from './CommandMenu';
 import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '../../shared/modelConstants';
+import { resolveCodexModelPreference } from '../../shared/codexModel';
 
 import { safeJsonParse } from '../lib/utils.js';
 
@@ -1936,6 +1937,13 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
   const [codexModel, setCodexModel] = useState(() => {
     return localStorage.getItem('codex-model') || CODEX_MODELS.DEFAULT;
   });
+  const [codexModelInfo, setCodexModelInfo] = useState(() => {
+    return {
+      source: localStorage.getItem('codex-model') ? 'storage' : 'default',
+      cliModel: null,
+      modelSupported: true
+    };
+  });
   // Track provider transitions so we only clear approvals when provider truly changes.
   // This does not sync with the backend; it just prevents UI prompts from disappearing.
   const lastProviderRef = useRef(provider);
@@ -1992,6 +2000,33 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
       })
       .catch(err => console.error('Error loading Cursor config:', err));
     }
+  }, [provider]);
+
+  // Load Codex default model from ~/.codex/config.toml (via backend)
+  useEffect(() => {
+    if (provider !== 'codex') return;
+
+    const storedModel = localStorage.getItem('codex-model');
+    if (storedModel) {
+      setCodexModelInfo(prev => ({ ...prev, source: 'storage' }));
+      return;
+    }
+
+    authenticatedFetch('/api/codex/config')
+    .then(res => res.json())
+    .then(data => {
+      if (!data?.success) return;
+
+      const cliModel = data.config?.model || null;
+      const resolved = resolveCodexModelPreference({ storedModel: null, cliModel });
+
+      const supportedValues = new Set(CODEX_MODELS.OPTIONS.map(o => o.value));
+      const finalModel = supportedValues.has(resolved.model) ? resolved.model : CODEX_MODELS.DEFAULT;
+
+      setCodexModel(finalModel);
+      setCodexModelInfo({ source: resolved.source, cliModel: resolved.cliModel, modelSupported: resolved.modelSupported });
+    })
+    .catch(err => console.error('Error loading Codex config:', err));
   }, [provider]);
 
   // Fetch slash commands on mount and when project changes
@@ -4918,7 +4953,7 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
                 {/* Model Selection - Always reserve space to prevent jumping */}
                 <div className={`mb-6 transition-opacity duration-200 ${provider ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Select Model
+                    {t('modelSelection.label')}
                   </label>
                   {provider === 'claude' ? (
                     <select
@@ -4935,19 +4970,32 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
                       ))}
                     </select>
                   ) : provider === 'codex' ? (
-                    <select
-                      value={codexModel}
-                      onChange={(e) => {
-                        const newModel = e.target.value;
-                        setCodexModel(newModel);
-                        localStorage.setItem('codex-model', newModel);
-                      }}
-                      className="pl-4 pr-10 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 min-w-[140px]"
-                    >
-                      {CODEX_MODELS.OPTIONS.map(({ value, label }) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
+                    <div className="flex flex-col gap-2">
+                      <select
+                        value={codexModel}
+                        onChange={(e) => {
+                          const newModel = e.target.value;
+                          setCodexModel(newModel);
+                          setCodexModelInfo(prev => ({ ...prev, source: 'storage' }));
+                          localStorage.setItem('codex-model', newModel);
+                        }}
+                        className="pl-4 pr-10 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 min-w-[140px]"
+                      >
+                        {CODEX_MODELS.OPTIONS.map(({ value, label }) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      {codexModelInfo.source === 'cli' && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {t('modelSelection.codex.usingCliDefault', { model: codexModel })}
+                        </p>
+                      )}
+                      {codexModelInfo.source === 'fallback' && (
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                          {t('modelSelection.codex.unsupportedCliModelFallback', { cliModel: codexModelInfo.cliModel, fallbackModel: CODEX_MODELS.DEFAULT })}
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <select
                       value={cursorModel}
@@ -4967,14 +5015,12 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
                 </div>
                 
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {provider === 'claude'
-                    ? `Ready to use Claude with ${claudeModel}. Start typing your message below.`
-                    : provider === 'cursor'
-                    ? `Ready to use Cursor with ${cursorModel}. Start typing your message below.`
-                    : provider === 'codex'
-                    ? `Ready to use Codex with ${codexModel}. Start typing your message below.`
-                    : 'Select a provider above to begin'
-                  }
+                  {provider
+                    ? t('modelSelection.ready', {
+                        provider: provider === 'cursor' ? t('messageTypes.cursor') : provider === 'codex' ? t('messageTypes.codex') : t('messageTypes.claude'),
+                        model: provider === 'cursor' ? cursorModel : provider === 'codex' ? codexModel : claudeModel
+                      })
+                    : t('modelSelection.selectProviderHint')}
                 </p>
                 
                 {/* Show NextTaskBanner when provider is selected and ready, only if TaskMaster is installed */}

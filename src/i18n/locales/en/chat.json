@@ -12,6 +12,15 @@
     "cursor": "Cursor",
     "codex": "Codex"
   },
+  "modelSelection": {
+    "label": "Select Model",
+    "ready": "Ready to use {{provider}} (model: {{model}}). Start typing your message below.",
+    "selectProviderHint": "Select a provider above to begin",
+    "codex": {
+      "usingCliDefault": "No model selected yet — using Codex CLI default: {{model}}",
+      "unsupportedCliModelFallback": "Codex CLI default model is not supported in this UI ({{cliModel}}). Falling back to {{fallbackModel}}. You can change it from the dropdown."
+    }
+  },
   "tools": {
     "settings": "Tool Settings",
     "error": "Tool Error",
