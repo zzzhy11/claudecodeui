@@ -1,44 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeFsPathForCompare, isPathSameOrInside, pathsBelongToSameProject } from './pathUtils.js';
+import { isPathSameOrInside, normalizeFsPathForCompare, pathsBelongToSameProject } from './pathUtils.js';
 
-test('normalizeFsPathForCompare handles basic paths', () => {
-  const normalized = normalizeFsPathForCompare('C:\\Repo\\Project\\');
-  assert.ok(normalized.toLowerCase().includes('c:\\repo\\project'));
-  assert.ok(!normalized.endsWith('\\'));
+test('normalizeFsPathForCompare handles empty input', () => {
+  assert.equal(normalizeFsPathForCompare(''), '');
+  assert.equal(normalizeFsPathForCompare('   '), '');
+  assert.equal(normalizeFsPathForCompare(null), '');
 });
 
-test('normalizeFsPathForCompare strips Windows long path prefix', () => {
-  if (process.platform !== 'win32') {
+test('isPathSameOrInside basic containment', () => {
+  if (process.platform === 'win32') {
+    assert.equal(isPathSameOrInside('C:\\Repo\\Proj', 'C:\\Repo\\Proj\\sub'), true);
+    assert.equal(isPathSameOrInside('C:\\Repo\\Proj', 'D:\\Repo\\Proj\\sub'), false);
     return;
   }
-  assert.equal(
-    normalizeFsPathForCompare('\\\\?\\C:\\Repo\\Project'),
-    normalizeFsPathForCompare('C:\\Repo\\Project')
-  );
+
+  assert.equal(isPathSameOrInside('/tmp/proj', '/tmp/proj/sub'), true);
+  assert.equal(isPathSameOrInside('/tmp/proj', '/var/tmp/proj'), false);
 });
 
-test('normalizeFsPathForCompare strips Windows UNC long path prefix', () => {
+test('pathsBelongToSameProject tolerates normalization differences', () => {
   if (process.platform !== 'win32') {
+    assert.equal(pathsBelongToSameProject('/tmp/proj', '/tmp/proj/child'), true);
+    assert.equal(pathsBelongToSameProject('/tmp/proj/child', '/tmp/proj'), true);
     return;
   }
+
+  // Case-insensitive on Windows
+  assert.equal(pathsBelongToSameProject('C:\\Repo\\Proj', 'c:\\repo\\proj\\sub'), true);
+
+  // Long path prefix
+  assert.equal(pathsBelongToSameProject('\\\\?\\C:\\Repo\\Proj', 'C:\\Repo\\Proj\\sub'), true);
+
+  // UNC long path prefix
   assert.equal(
-    normalizeFsPathForCompare('\\\\?\\UNC\\Server\\Share\\Proj'),
-    normalizeFsPathForCompare('\\\\Server\\Share\\Proj')
+    pathsBelongToSameProject('\\\\?\\UNC\\SERVER\\Share\\Path', '\\\\server\\share\\path\\child'),
+    true
   );
-});
-
-test('isPathSameOrInside returns true for subdirectories', () => {
-  const parent = process.platform === 'win32' ? 'C:\\Repo\\Project' : '/repo/project';
-  const child = process.platform === 'win32' ? 'C:\\Repo\\Project\\sub' : '/repo/project/sub';
-  assert.equal(isPathSameOrInside(parent, child), true);
-});
-
-test('pathsBelongToSameProject matches in either direction', () => {
-  const root = process.platform === 'win32' ? 'C:\\Repo\\Project' : '/repo/project';
-  const sub = process.platform === 'win32' ? 'C:\\Repo\\Project\\sub' : '/repo/project/sub';
-  assert.equal(pathsBelongToSameProject(root, sub), true);
-  assert.equal(pathsBelongToSameProject(sub, root), true);
 });
 

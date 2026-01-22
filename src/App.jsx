@@ -360,7 +360,20 @@ function AppContent() {
         if (session) {
           setSelectedProject(project);
           setSelectedSession({ ...session, __provider: 'claude' });
+          localStorage.setItem('selected-provider', 'claude');
           // Only switch to chat tab if we're loading a different session
+          if (shouldSwitchTab) {
+            setActiveTab('chat');
+          }
+          return;
+        }
+
+        // Also check Codex sessions so /session/:id deep links keep working after refresh
+        const codexSession = project.codexSessions?.find(s => s.id === sessionId);
+        if (codexSession) {
+          setSelectedProject(project);
+          setSelectedSession({ ...codexSession, __provider: 'codex' });
+          localStorage.setItem('selected-provider', 'codex');
           if (shouldSwitchTab) {
             setActiveTab('chat');
           }
@@ -371,6 +384,7 @@ function AppContent() {
         if (cSession) {
           setSelectedProject(project);
           setSelectedSession({ ...cSession, __provider: 'cursor' });
+          localStorage.setItem('selected-provider', 'cursor');
           if (shouldSwitchTab) {
             setActiveTab('chat');
           }
@@ -394,6 +408,10 @@ function AppContent() {
   };
 
   const handleSessionSelect = (session) => {
+    // 确保侧边栏点击会话时，provider 与该会话一致（Codex/Cursor/Claude 混合列表场景）
+    const providerToUse = session.__provider || localStorage.getItem('selected-provider') || 'claude';
+    localStorage.setItem('selected-provider', providerToUse);
+
     setSelectedSession(session);
     // Only switch to chat tab when user explicitly selects a session
     // This prevents tab switching during automatic updates
@@ -403,8 +421,7 @@ function AppContent() {
 
     // For Cursor sessions, we need to set the session ID differently
     // since they're persistent and not created by Claude
-    const provider = localStorage.getItem('selected-provider') || 'claude';
-    if (provider === 'cursor') {
+    if (providerToUse === 'cursor') {
       // Cursor sessions have persistent IDs
       sessionStorage.setItem('cursorSessionId', session.id);
     }
