@@ -50,6 +50,104 @@ router.get('/config', async (req, res) => {
   }
 });
 
+router.get('/health', async (req, res) => {
+  const codexHome = path.join(os.homedir(), '.codex');
+  const sessionsDir = path.join(codexHome, 'sessions');
+  const configPath = path.join(codexHome, 'config.toml');
+
+  const statSafe = async (p) => {
+    try {
+      const st = await fs.stat(p);
+      return { exists: true, isDirectory: st.isDirectory(), mtimeMs: st.mtimeMs };
+    } catch (e) {
+      if (e?.code === 'ENOENT') return { exists: false };
+      return { exists: false, error: e.message, code: e.code };
+    }
+  };
+
+  const countJsonlFiles = async (dir, limit = 2000) => {
+    let count = 0;
+    let truncated = false;
+    const walk = async (d) => {
+      if (truncated) return;
+      let entries = [];
+      try {
+        entries = await fs.readdir(d, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (truncated) break;
+        const fullPath = path.join(d, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          count++;
+          if (count >= limit) {
+            truncated = true;
+            break;
+          }
+        }
+      }
+    };
+    await walk(dir);
+    return { count, truncated, limit };
+  };
+
+  // Check CLI availability
+  const cli = await new Promise((resolve) => {
+    const proc = spawn('codex', ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+
+    const done = (payload) => resolve(payload);
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch {}
+      done({ available: false, error: 'timeout' });
+    }, 1500);
+
+    proc.stdout?.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr?.on('data', (d) => { stderr += d.toString(); });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      done({
+        available: code === 0,
+        exitCode: code,
+        version: stdout.trim() || null,
+        stderr: stderr.trim() || null
+      });
+    });
+
+    proc.on('error', (error) => {
+      clearTimeout(timer);
+      done({ available: false, code: error.code, error: error.message });
+    });
+  });
+
+  const sessionsStat = await statSafe(sessionsDir);
+  const configStat = await statSafe(configPath);
+  const sessionsCount = sessionsStat.exists && sessionsStat.isDirectory ? await countJsonlFiles(sessionsDir) : { count: 0, truncated: false };
+
+  res.json({
+    success: true,
+    env: {
+      hasOpenAIKey: !!process.env.OPENAI_API_KEY
+    },
+    cli,
+    paths: {
+      codexHome,
+      sessionsDir,
+      configPath
+    },
+    sessionsDir: {
+      ...sessionsStat,
+      jsonlFiles: sessionsCount
+    },
+    config: configStat
+  });
+});
+
 router.get('/sessions', async (req, res) => {
   try {
     const { projectPath } = req.query;

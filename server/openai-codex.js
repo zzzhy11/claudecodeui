@@ -177,7 +177,8 @@ function mapPermissionModeToCodexOptions(permissionMode) {
     default:
       return {
         sandboxMode: 'workspace-write',
-        approvalPolicy: 'untrusted'
+        // UI currently does not implement Codex approval UX; avoid hanging on approvals.
+        approvalPolicy: 'never'
       };
   }
 }
@@ -289,7 +290,9 @@ export async function queryCodex(command, options = {}, ws) {
 
     sendMessage(ws, {
       type: 'codex-error',
-      error: error.message,
+      error: error?.message || 'Codex error',
+      code: error?.code || error?.name,
+      details: error?.stack,
       sessionId: currentSessionId
     });
 

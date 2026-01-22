@@ -3867,9 +3867,17 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
           // Handle Codex errors
           setIsLoading(false);
           setCanAbortSession(false);
+          const codexErrorText = (() => {
+            const message = latestMessage.error || 'An error occurred with Codex';
+            const details = latestMessage.details || latestMessage.code;
+            if (typeof message === 'string' && /unauthorized|api key|401/i.test(message)) {
+              return `${message}\n\nTip: 请确认已设置 OPENAI_API_KEY，并确保服务端进程能读取到该环境变量。`;
+            }
+            return details ? `${message}\n\nDetails: ${details}` : message;
+          })();
           setChatMessages(prev => [...prev, {
             type: 'error',
-            content: latestMessage.error || 'An error occurred with Codex',
+            content: codexErrorText,
             timestamp: new Date()
           }]);
           break;
@@ -4327,7 +4335,15 @@ function ChatInterface({ selectedProject, selectedSession, ws, sendMessage, mess
     setTimeout(() => scrollToBottom(), 100); // Longer delay to ensure message is rendered
 
     // Determine effective session id for replies to avoid race on state updates
-    const effectiveSessionId = currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
+    const effectiveSessionId = (() => {
+      if (provider === 'cursor') {
+        return currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
+      }
+      if (provider === 'codex') {
+        return currentSessionId || selectedSession?.id;
+      }
+      return currentSessionId || selectedSession?.id;
+    })();
 
     // Session Protection: Mark session as active to prevent automatic project updates during conversation
     // Use existing session if available; otherwise a temporary placeholder until backend provides real ID

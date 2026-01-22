@@ -53,7 +53,6 @@ import http from 'http';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
 import { spawn } from 'child_process';
-import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
@@ -81,6 +80,17 @@ import { validateApiKey, authenticateToken, authenticateWebSocket } from './midd
 let projectsWatcher = null;
 const connectedClients = new Set();
 let isGetProjectsRunning = false; // Flag to prevent reentrant calls
+
+let nodePtyPromise = null;
+async function loadNodePty() {
+    if (nodePtyPromise) {
+        return nodePtyPromise;
+    }
+    nodePtyPromise = import('node-pty')
+        .then((mod) => mod?.default || mod)
+        .catch(() => null);
+    return nodePtyPromise;
+}
 
 // Broadcast progress to all connected WebSocket clients
 function broadcastProgress(progress) {
@@ -1050,6 +1060,15 @@ function handleShellConnection(ws) {
                     const termCols = data.cols || 80;
                     const termRows = data.rows || 24;
                     console.log('📐 Using terminal dimensions:', termCols, 'x', termRows);
+
+                    const pty = await loadNodePty();
+                    if (!pty?.spawn) {
+                        ws.send(JSON.stringify({
+                            type: 'output',
+                            data: `\r\n\x1b[31mError: node-pty 未安装或安装失败（可选依赖）。终端功能不可用，但不影响 Codex/Claude/Cursor 聊天。\x1b[0m\r\n`
+                        }));
+                        return;
+                    }
 
                     shellProcess = pty.spawn(shell, shellArgs, {
                         name: 'xterm-256color',

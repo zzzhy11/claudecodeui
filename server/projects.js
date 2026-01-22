@@ -65,6 +65,7 @@ import crypto from 'crypto';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import os from 'os';
+import { pathsBelongToSameProject } from './utils/pathUtils.js';
 
 // Import TaskMaster detection functions
 async function detectTaskMasterFolder(projectPath) {
@@ -460,7 +461,7 @@ async function getProjects(progressCallback = null) {
 
         // Also fetch Codex sessions for this project
         try {
-          project.codexSessions = await getCodexSessions(actualProjectDir);
+          project.codexSessions = (await getCodexSessions(actualProjectDir)).slice(0, 5);
         } catch (e) {
           console.warn(`Could not load Codex sessions for project ${entry.name}:`, e.message);
           project.codexSessions = [];
@@ -546,7 +547,7 @@ async function getProjects(progressCallback = null) {
 
       // Try to fetch Codex sessions for manual projects too
       try {
-        project.codexSessions = await getCodexSessions(actualProjectDir);
+        project.codexSessions = (await getCodexSessions(actualProjectDir)).slice(0, 5);
       } catch (e) {
         console.warn(`Could not load Codex sessions for manual project ${projectName}:`, e.message);
       }
@@ -1227,39 +1228,15 @@ async function getCodexSessions(projectPath) {
       return [];
     }
 
-    // Recursively find all .jsonl files in the sessions directory
-    const findJsonlFiles = async (dir) => {
-      const files = [];
-      try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry.name);
-          if (entry.isDirectory()) {
-            files.push(...await findJsonlFiles(fullPath));
-          } else if (entry.name.endsWith('.jsonl')) {
-            files.push(fullPath);
-          }
-        }
-      } catch (error) {
-        // Skip directories we can't read
-      }
-      return files;
-    };
-
-    const jsonlFiles = await findJsonlFiles(codexSessionsDir);
+    const jsonlFiles = await getCodexSessionJsonlFilesCached(codexSessionsDir);
 
     // Process each file to find sessions matching the project path
     for (const filePath of jsonlFiles) {
       try {
         const sessionData = await parseCodexSessionFile(filePath);
 
-        // Check if this session matches the project path
-        // Handle Windows long paths with \\?\ prefix
-        const sessionCwd = sessionData?.cwd || '';
-        const cleanSessionCwd = sessionCwd.startsWith('\\\\?\\') ? sessionCwd.slice(4) : sessionCwd;
-        const cleanProjectPath = projectPath.startsWith('\\\\?\\') ? projectPath.slice(4) : projectPath;
-
-        if (sessionData && (sessionData.cwd === projectPath || cleanSessionCwd === cleanProjectPath || path.relative(cleanSessionCwd, cleanProjectPath) === '')) {
+        // Match sessions created in project root or any subdirectory (and tolerate path normalization differences).
+        if (sessionData && pathsBelongToSameProject(projectPath, sessionData.cwd)) {
           sessions.push({
             id: sessionData.id,
             summary: sessionData.summary || 'Codex Session',
@@ -1279,12 +1256,58 @@ async function getCodexSessions(projectPath) {
     // Sort sessions by last activity (newest first)
     sessions.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
 
-    // Return only the first 5 sessions for performance
-    return sessions.slice(0, 5);
+    // Return all matching sessions; call sites can slice for performance if needed.
+    return sessions;
 
   } catch (error) {
     console.error('Error fetching Codex sessions:', error);
     return [];
+  }
+}
+
+// Cache the Codex sessions directory scan to avoid repeated full-disk walks during project list refresh.
+const CODEX_JSONL_CACHE_TTL_MS = 10_000;
+let codexJsonlCache = { loadedAt: 0, files: [] };
+let codexJsonlCachePromise = null;
+
+async function getCodexSessionJsonlFilesCached(codexSessionsDir) {
+  const now = Date.now();
+  if (codexJsonlCache.files.length > 0 && (now - codexJsonlCache.loadedAt) < CODEX_JSONL_CACHE_TTL_MS) {
+    return codexJsonlCache.files;
+  }
+
+  if (codexJsonlCachePromise) {
+    return codexJsonlCachePromise;
+  }
+
+  codexJsonlCachePromise = (async () => {
+    const findJsonlFiles = async (dir) => {
+      const files = [];
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            files.push(...await findJsonlFiles(fullPath));
+          } else if (entry.name.endsWith('.jsonl')) {
+            files.push(fullPath);
+          }
+        }
+      } catch (error) {
+        // Skip directories we can't read
+      }
+      return files;
+    };
+
+    const files = await findJsonlFiles(codexSessionsDir);
+    codexJsonlCache = { loadedAt: Date.now(), files };
+    return files;
+  })();
+
+  try {
+    return await codexJsonlCachePromise;
+  } finally {
+    codexJsonlCachePromise = null;
   }
 }
 
@@ -1392,6 +1415,7 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
     }
 
     const messages = [];
+    const seen = new Set();
     let tokenUsage = null;
     const fileStream = fsSync.createReadStream(sessionFilePath);
     const rl = readline.createInterface({
@@ -1445,14 +1469,37 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
 
             // Only add if there's actual content
             if (textContent?.trim()) {
-              messages.push({
-                type: role === 'user' ? 'user' : 'assistant',
-                timestamp: entry.timestamp,
-                message: {
-                  role: role,
-                  content: textContent
-                }
-              });
+              const key = `msg:${entry.timestamp}:${role}:${textContent}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                messages.push({
+                  type: role === 'user' ? 'user' : 'assistant',
+                  timestamp: entry.timestamp,
+                  message: {
+                    role: role,
+                    content: textContent
+                  }
+                });
+              }
+            }
+          }
+
+          // Codex often records user prompts as event_msg.user_message (not response_item.message).
+          if (entry.type === 'event_msg' && entry.payload?.type === 'user_message' && entry.payload?.message) {
+            const text = String(entry.payload.message);
+            if (text && !text.includes('<environment_context>')) {
+              const key = `user:${entry.timestamp}:${text}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                messages.push({
+                  type: 'user',
+                  timestamp: entry.timestamp,
+                  message: {
+                    role: 'user',
+                    content: text
+                  }
+                });
+              }
             }
           }
 
@@ -1462,14 +1509,18 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
               .filter(Boolean)
               .join('\n');
             if (summaryText?.trim()) {
-              messages.push({
-                type: 'thinking',
-                timestamp: entry.timestamp,
-                message: {
-                  role: 'assistant',
-                  content: summaryText
-                }
-              });
+              const key = `think:${entry.timestamp}:${summaryText}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                messages.push({
+                  type: 'thinking',
+                  timestamp: entry.timestamp,
+                  message: {
+                    role: 'assistant',
+                    content: summaryText
+                  }
+                });
+              }
             }
           }
 
@@ -1488,22 +1539,30 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
               }
             }
 
-            messages.push({
-              type: 'tool_use',
-              timestamp: entry.timestamp,
-              toolName: toolName,
-              toolInput: toolInput,
-              toolCallId: entry.payload.call_id
-            });
+            const key = `tool_use:${entry.timestamp}:${toolName}:${entry.payload.call_id}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              messages.push({
+                type: 'tool_use',
+                timestamp: entry.timestamp,
+                toolName: toolName,
+                toolInput: toolInput,
+                toolCallId: entry.payload.call_id
+              });
+            }
           }
 
           if (entry.type === 'response_item' && entry.payload?.type === 'function_call_output') {
-            messages.push({
-              type: 'tool_result',
-              timestamp: entry.timestamp,
-              toolCallId: entry.payload.call_id,
-              output: entry.payload.output
-            });
+            const key = `tool_result:${entry.timestamp}:${entry.payload.call_id}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              messages.push({
+                type: 'tool_result',
+                timestamp: entry.timestamp,
+                toolCallId: entry.payload.call_id,
+                output: entry.payload.output
+              });
+            }
           }
 
           if (entry.type === 'response_item' && entry.payload?.type === 'custom_tool_call') {
@@ -1528,35 +1587,47 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
                 }
               }
 
-              messages.push({
-                type: 'tool_use',
-                timestamp: entry.timestamp,
-                toolName: 'Edit',
-                toolInput: JSON.stringify({
-                  file_path: filePath,
-                  old_string: oldLines.join('\n'),
-                  new_string: newLines.join('\n')
-                }),
-                toolCallId: entry.payload.call_id
-              });
+              const key = `tool_use:${entry.timestamp}:Edit:${entry.payload.call_id}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                messages.push({
+                  type: 'tool_use',
+                  timestamp: entry.timestamp,
+                  toolName: 'Edit',
+                  toolInput: JSON.stringify({
+                    file_path: filePath,
+                    old_string: oldLines.join('\n'),
+                    new_string: newLines.join('\n')
+                  }),
+                  toolCallId: entry.payload.call_id
+                });
+              }
             } else {
-              messages.push({
-                type: 'tool_use',
-                timestamp: entry.timestamp,
-                toolName: toolName,
-                toolInput: input,
-                toolCallId: entry.payload.call_id
-              });
+              const key = `tool_use:${entry.timestamp}:${toolName}:${entry.payload.call_id}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                messages.push({
+                  type: 'tool_use',
+                  timestamp: entry.timestamp,
+                  toolName: toolName,
+                  toolInput: input,
+                  toolCallId: entry.payload.call_id
+                });
+              }
             }
           }
 
           if (entry.type === 'response_item' && entry.payload?.type === 'custom_tool_call_output') {
-            messages.push({
-              type: 'tool_result',
-              timestamp: entry.timestamp,
-              toolCallId: entry.payload.call_id,
-              output: entry.payload.output || ''
-            });
+            const key = `tool_result:${entry.timestamp}:${entry.payload.call_id}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              messages.push({
+                type: 'tool_result',
+                timestamp: entry.timestamp,
+                toolCallId: entry.payload.call_id,
+                output: entry.payload.output || ''
+              });
+            }
           }
 
         } catch (parseError) {
