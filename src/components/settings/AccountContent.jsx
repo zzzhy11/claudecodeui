@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { LogIn } from 'lucide-react';
@@ -6,7 +5,6 @@ import ClaudeLogo from '../ClaudeLogo';
 import CursorLogo from '../CursorLogo';
 import CodexLogo from '../CodexLogo';
 import { useTranslation } from 'react-i18next';
-import { authenticatedFetch } from '../../utils/api';
 
 const agentConfig = {
   claude: {
@@ -45,127 +43,6 @@ export default function AccountContent({ agent, authStatus, onLogin }) {
   const { t } = useTranslation('settings');
   const config = agentConfig[agent];
   const { Logo } = config;
-
-  const [codexHealth, setCodexHealth] = useState({
-    loading: false,
-    data: null,
-    error: null,
-    updatedAt: null
-  });
-
-  const fetchCodexHealth = useCallback(async () => {
-    setCodexHealth((prev) => ({ ...prev, loading: true, error: null }));
-    try {
-      const resp = await authenticatedFetch('/api/codex/health');
-      const json = await resp.json().catch(() => null);
-      if (!resp.ok || !json?.success) {
-        const errorText = json?.error || json?.details || json?.message || `HTTP ${resp.status}`;
-        setCodexHealth({ loading: false, data: null, error: errorText, updatedAt: new Date() });
-        return;
-      }
-      setCodexHealth({ loading: false, data: json, error: null, updatedAt: new Date() });
-    } catch (e) {
-      setCodexHealth({ loading: false, data: null, error: e?.message || String(e), updatedAt: new Date() });
-    }
-  }, []);
-
-  useEffect(() => {
-    if (agent === 'codex') {
-      fetchCodexHealth();
-    }
-  }, [agent, fetchCodexHealth]);
-
-  const renderCodexHealth = () => {
-    if (agent !== 'codex') return null;
-
-    const data = codexHealth.data;
-    const cliAvailable = !!data?.cli?.available;
-    const hasOpenAIKey = !!data?.env?.hasOpenAIKey;
-    const sessionsExists = !!data?.sessionsDir?.exists;
-    const configExists = !!data?.config?.exists;
-    const jsonlCount = data?.sessionsDir?.jsonlFiles?.count ?? null;
-    const jsonlTruncated = !!data?.sessionsDir?.jsonlFiles?.truncated;
-    const jsonlLimit = data?.sessionsDir?.jsonlFiles?.limit ?? null;
-
-    return (
-      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="font-medium text-foreground">{t('agents.codexHealth.title')}</div>
-            <div className="text-sm text-muted-foreground">
-              {codexHealth.updatedAt
-                ? t('agents.codexHealth.lastUpdated', { time: codexHealth.updatedAt.toLocaleString() })
-                : t('agents.codexHealth.notChecked')}
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={fetchCodexHealth} disabled={codexHealth.loading}>
-            {codexHealth.loading ? t('agents.codexHealth.checking') : t('agents.codexHealth.refresh')}
-          </Button>
-        </div>
-
-        {codexHealth.error && (
-          <div className="text-sm text-red-600 dark:text-red-400">
-            {t('agents.codexHealth.error', { error: codexHealth.error })}
-          </div>
-        )}
-
-        {data && (
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t('agents.codexHealth.items.cli')}</span>
-              <span className="flex items-center gap-2">
-                <Badge variant={cliAvailable ? 'success' : 'secondary'}>
-                  {cliAvailable ? t('agents.codexHealth.status.ok') : t('agents.codexHealth.status.missing')}
-                </Badge>
-                {cliAvailable && data?.cli?.version ? (
-                  <span className="font-mono text-xs text-muted-foreground">{data.cli.version}</span>
-                ) : null}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t('agents.codexHealth.items.openAIKey')}</span>
-              <Badge variant={hasOpenAIKey ? 'success' : 'secondary'}>
-                {hasOpenAIKey ? t('agents.codexHealth.status.ok') : t('agents.codexHealth.status.missing')}
-              </Badge>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t('agents.codexHealth.items.sessionsDir')}</span>
-              <span className="flex items-center gap-2">
-                <Badge variant={sessionsExists ? 'success' : 'secondary'}>
-                  {sessionsExists ? t('agents.codexHealth.status.ok') : t('agents.codexHealth.status.missing')}
-                </Badge>
-                {typeof jsonlCount === 'number' ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t('agents.codexHealth.jsonlCount', { count: jsonlCount })}
-                    {jsonlTruncated && jsonlLimit ? t('agents.codexHealth.truncated', { limit: jsonlLimit }) : ''}
-                  </span>
-                ) : null}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{t('agents.codexHealth.items.configFile')}</span>
-              <Badge variant={configExists ? 'success' : 'secondary'}>
-                {configExists ? t('agents.codexHealth.status.ok') : t('agents.codexHealth.status.missing')}
-              </Badge>
-            </div>
-
-            {(!cliAvailable || !hasOpenAIKey) && (
-              <div className="pt-2 text-xs text-muted-foreground">
-                {t('agents.codexHealth.hints.title')}
-                <ul className="list-disc ml-5 mt-1 space-y-1">
-                  {!cliAvailable ? <li>{t('agents.codexHealth.hints.cli')}</li> : null}
-                  {!hasOpenAIKey ? <li>{t('agents.codexHealth.hints.openAIKey')}</li> : null}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="space-y-6">
@@ -244,8 +121,6 @@ export default function AccountContent({ agent, authStatus, onLogin }) {
           )}
         </div>
       </div>
-
-      {renderCodexHealth()}
     </div>
   );
 }

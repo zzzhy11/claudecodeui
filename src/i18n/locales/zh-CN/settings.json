@@ -286,32 +286,7 @@
       "button": "登录",
       "reLoginButton": "重新登录"
     },
-    "error": "错误：{{error}}",
-    "codexHealth": {
-      "title": "Codex 健康检查",
-      "refresh": "刷新",
-      "checking": "检查中...",
-      "notChecked": "尚未检查",
-      "lastUpdated": "最近更新：{{time}}",
-      "error": "检查失败：{{error}}",
-      "items": {
-        "cli": "Codex CLI",
-        "openAIKey": "OPENAI_API_KEY",
-        "sessionsDir": "~/.codex/sessions",
-        "configFile": "~/.codex/config.toml"
-      },
-      "status": {
-        "ok": "正常",
-        "missing": "缺失"
-      },
-      "jsonlCount": "{{count}} 个 .jsonl",
-      "truncated": "（已截断，最多 {{limit}}）",
-      "hints": {
-        "title": "排查建议：",
-        "cli": "请先安装 Codex CLI，并确保 `codex --version` 在后端机器上可执行。",
-        "openAIKey": "请为后端进程配置 OPENAI_API_KEY（例如系统环境变量或启动脚本注入）。"
-      }
-    }
+    "error": "错误：{{error}}"
   },
   "permissions": {
     "title": "权限设置",

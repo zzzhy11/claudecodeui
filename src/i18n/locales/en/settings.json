@@ -286,32 +286,7 @@
       "button": "Login",
       "reLoginButton": "Re-login"
     },
-    "error": "Error: {{error}}",
-    "codexHealth": {
-      "title": "Codex Health Check",
-      "refresh": "Refresh",
-      "checking": "Checking...",
-      "notChecked": "Not checked yet",
-      "lastUpdated": "Last updated: {{time}}",
-      "error": "Health check failed: {{error}}",
-      "items": {
-        "cli": "Codex CLI",
-        "openAIKey": "OPENAI_API_KEY",
-        "sessionsDir": "~/.codex/sessions",
-        "configFile": "~/.codex/config.toml"
-      },
-      "status": {
-        "ok": "OK",
-        "missing": "Missing"
-      },
-      "jsonlCount": "{{count}} .jsonl files",
-      "truncated": " (truncated, limit {{limit}})",
-      "hints": {
-        "title": "Troubleshooting:",
-        "cli": "Install the Codex CLI and make sure `codex --version` works on the backend machine.",
-        "openAIKey": "Set OPENAI_API_KEY for the backend process (env var or startup script)."
-      }
-    }
+    "error": "Error: {{error}}"
   },
   "permissions": {
     "title": "Permission Settings",
